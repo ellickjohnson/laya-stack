@@ -1,0 +1,60 @@
+# Laya — open-source Jev-compatible System 1 decision engine (NandhaKishorM/laya)
+# Serves the TypeSafe Jev /v1/systemone wire protocol over HTTP (laya-serve) + GET /health
+# Upstream: https://github.com/NandhaKishorM/laya
+#
+# Build-from-source: upstream publishes no images (the Dockerfile is the distribution).
+# Pinned to upstream commit fa9a2a7070b1789912a49ae24603bbfb1a78b001 (v0.3.24, 2026-10-02).
+# Roll forward: bump LAYA_UPSTREAM_REF / the build context ref below, then redeploy in Portainer.
+#
+# Model weights (~1.7 GB fp32 per checkpoint) download from HuggingFace on first boot into
+# the named volume; no HF account needed. CPU device by default — Laya is a small
+# classification model and the upstream CPU quickstart is the supported path. The VM has
+# the nvidia runtime configured if we ever pin a CUDA build.
+#
+# Secrets live in the Portainer stack env (agents convention) — never in this repo.
+
+services:
+  laya:
+    build:
+      context: https://github.com/NandhaKishorM/laya.git#fa9a2a7070b1789912a49ae24603bbfb1a78b001
+      args:
+        TORCH_INDEX: cpu
+        TORCH_VERSION: "2.14.0"
+    image: laya:0.3.24
+    container_name: laya
+    restart: unless-stopped
+    command: ["laya-serve"]
+    environment:
+      - LAYA_DEVICE=cpu
+      - LAYA_PORT=8000
+      # preload checkpoints at startup so /health means "usable" (first boot downloads
+      # weights and takes minutes; steady-state boot from cache is fast)
+      - LAYA_PRELOAD=${LAYA_PRELOAD:-1}
+      # router: english + multilingual resident; auto-routes non-English input
+      - LAYA_MODELS=${LAYA_MODELS:-english,multilingual}
+      - LAYA_DEFAULT_MODEL=${LAYA_DEFAULT_MODEL:-english}
+      - LAYA_THREADS=${LAYA_THREADS:-4}
+      # supply-chain pin: only weights from Laya's reviewed commit SHAs may load
+      - LAYA_REVISION=${LAYA_REVISION:-reviewed}
+      - LAYA_API_KEY=${LAYA_API_KEY}
+      - LAYA_LOG_LEVEL=info
+    volumes:
+      - laya_model-cache:/home/laya/.cache/huggingface
+    networks:
+      - proxy-net
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10m
+      start_interval: 2s
+
+volumes:
+  laya_model-cache:
+    name: laya_model-cache
+
+networks:
+  proxy-net:
+    external: true
