@@ -1,0 +1,49 @@
+services:
+  pi-agent:
+    build: .
+    # one image per agent so stack rebuilds never race on a shared tag
+    image: ${IMAGE_NAME:-pi-agent}:local
+    container_name: ${CONTAINER_NAME:-pi-agent}
+    restart: unless-stopped
+    environment:
+      # --- Vaultwarden bootstrap (the ONLY secrets Portainer stores) ---
+      BW_URL: ${BW_URL:-https://vaultwarden.ellickjohnson.net}
+      BW_ITEM: ${BW_ITEM:-pi-agent}
+      BW_CLIENTID: ${BW_CLIENTID}
+      BW_CLIENTSECRET: ${BW_CLIENTSECRET}
+      BW_PASSWORD: ${BW_PASSWORD}
+      # --- Buzz identity / harness ---
+      BUZZ_RELAY_URL: ${BUZZ_RELAY_URL:-wss://buzz.ellickjohnson.net}
+      AGENT_NAME: ${AGENT_NAME:-big-bit}
+      # AGENT_PROMPT: optional — falls back to the repo-baked config/agent-prompt.md (big-bit)
+      AGENT_PROMPT: ${AGENT_PROMPT:-}
+      BUZZ_ACP_MODEL: ${BUZZ_ACP_MODEL:-freellmapi/glm-5.3}
+      # inbound author gate: owner (implicit) + allowlist pubkeys
+      BUZZ_ACP_AGENT_OWNER: ${BUZZ_ACP_AGENT_OWNER:-}
+      BUZZ_ACP_RESPOND_TO: ${BUZZ_ACP_RESPOND_TO:-owner-only}
+      BUZZ_ACP_RESPOND_TO_ALLOWLIST: ${BUZZ_ACP_RESPOND_TO_ALLOWLIST:-}
+    volumes:
+      # agent home: pi config, sessions, wiki state, workspace (AGENTS.md dirs)
+      - pi-agent-home:/home/agent
+      # shared team memory — same NFS export every other agent mounts
+      - /mnt/truenas/storage/obsidian-vault:/opt/obsidian-vault
+      # VW tripwire state (read-only): no secrets. Writer chmods 644 and
+      # rewrites via rename every 15 min — a single-file bind pins a stale
+      # inode after the first rename, so the directory is mounted RO instead
+      - /opt/tripwire-state:/tripwire:ro
+    networks:
+      - default
+      - vaultwarden_internal   # optional: reach vaultwarden container-to-container
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"           # capacity discipline per docker-vm-capacity-tuning
+          memory: 2g
+
+volumes:
+  pi-agent-home:
+
+networks:
+  vaultwarden_internal:
+    name: vaultwarden_vaultwarden_internal
+    external: true
